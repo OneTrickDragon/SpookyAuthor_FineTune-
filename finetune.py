@@ -31,3 +31,22 @@ peft_config = LoraConfig(
     task_type = "CAUSAL_LM"
 )
 
+def formatting_prompts_func(example):
+    output_texts = []
+    for i in range(len(example['instruction'])):
+        text = f"### Instruction: {example['instruction'][i]}\n### Response: {example['response'][i]}"
+        output_texts.append(text)
+    return output_texts
+
+training_args = TrainingArguments(
+    output_dir="./results",
+    per_device_train_batch_size=4,
+    gradient_accumulation_steps=4,
+    learning_rate=2e-4,
+    logging_steps=10,
+    max_steps=100,
+    optim="paged_adamw_32bit",      # The QLoRA-optimized optimizer
+    fp16=True,
+    save_strategy="steps",
+    save_steps=50,
+)
