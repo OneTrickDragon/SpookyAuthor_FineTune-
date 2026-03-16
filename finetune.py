@@ -33,8 +33,26 @@ peft_config = LoraConfig(
 
 def formatting_prompts_func(example):
     output_texts = []
-    for i in range(len(example['instruction'])):
-        text = f"### Instruction: {example['instruction'][i]}\n### Response: {example['response'][i]}"
+
+    author_map = {
+        "EAP": "Edgar Allan Poe",
+        "HPL": "H.P. Lovecraft",
+        "MWS": "Mary Shelley"
+    }
+
+    for i in range(len(example['text'])):
+        instruction = (
+            "Analyze the following gothic sentence and identify which author wrote it: "
+            "Edgar Allan Poe, H.P. Lovecraft, or Mary Shelley."
+        )
+        input_text = example['text'][i]
+        label = author_map.get(example['author'][i], example['author'][i])
+
+        text = (
+            f"### Instruction:\n{instruction}\n\n"
+            f"### Input:\n{input_text}\n\n"
+            f"### Response:\n{label}{tokenizer.eos_token}"
+        )
         output_texts.append(text)
     return output_texts
 
