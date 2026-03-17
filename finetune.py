@@ -7,6 +7,7 @@ from transformers import (
 from peft import LoraConfig, get_peft_model
 from trl import SFTTrainer, SFTConfig
 from datasets import load_dataset
+import pandas as pd
 
 bnb_config = BitsAndBytesConfig(
     load_in_4bit=True,
@@ -68,3 +69,29 @@ training_args = TrainingArguments(
     save_strategy="steps",
     save_steps=50,
 )
+
+train_dataset = pd.read_csv("train.csv")
+test_dataset = pd.read("test.csv")
+
+sftconfig = SFTConfig(
+    output_dir= "./resutlts",
+    dataset_text_field="text",
+    max_length=512,
+    packing=False,
+    per_device_train_batch_size=4,
+    learning_rate=2e-4,
+)
+
+sfttrainer = SFTTrainer(
+    model= model,
+    train_dataset= train_dataset,
+    eval_dataset= test_dataset,
+    peft_config= peft_config,
+    args= sftconfig,
+    processing_class=tokenizer
+)
+
+sfttrainer.train()
+
+sfttrainer.model.save_pretrained("./results")
+print("Training complete! Adapter saved.")
