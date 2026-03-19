@@ -1,97 +1,77 @@
 from transformers import (
-    AutoModelForCausalLM,
+    AutoModelForSequenceClassification, 
     AutoTokenizer,
     BitsAndBytesConfig,
     TrainingArguments,
 )
-from peft import LoraConfig, get_peft_model
+from peft import LoraConfig, get_peft_model, TaskType
 from trl import SFTTrainer, SFTConfig
-from datasets import load_dataset
+from datasets import Dataset 
 import pandas as pd
+import torch
 
 bnb_config = BitsAndBytesConfig(
     load_in_4bit=True,
     bnb_4bit_quant_type="nf4",
-    bnb_4bit_compute_dtype="float16",
+    bnb_4bit_compute_dtype=torch.float16,
     bnb_4bit_use_double_quant=True,
 )
 
 model_id = "mistralai/Mistral-7B-v0.1"
-model = AutoModelForCausalLM.from_pretrained(model_id, quantization_config=bnb_config, device = "auto")
+model = AutoModelForSequenceClassification.from_pretrained(
+    model_id, 
+    num_labels=3, 
+    quantization_config=bnb_config, 
+    device_map="auto"
+)
+
 
 tokenizer = AutoTokenizer.from_pretrained(model_id)
 tokenizer.pad_token = tokenizer.eos_token
-tokenizer.padding_side = "right"
+tokenizer.padding_side = "right" 
 
 peft_config = LoraConfig(
-    r = 16,
-    lora_alpha = 32,
+    r=16,
+    lora_alpha=32,
     target_modules=["q_proj", "k_proj", "v_proj", "o_proj"],
     lora_dropout=0.05,
-    bias = "none",
-    task_type = "CAUSAL_LM"
+    bias="none",
+    task_type=TaskType.SEQ_CLS 
 )
 
-def formatting_prompts_func(example):
-    output_texts = []
+# Convert labels to integers: EAP:0, HPL:1, MWS:2
+author_map = {"EAP": 0, "HPL": 1, "MWS": 2}
+df_train = pd.read_csv("train.csv")
+df_train['label'] = df_train['author'].map(author_map)
 
-    author_map = {
-        "EAP": "Edgar Allan Poe",
-        "HPL": "H.P. Lovecraft",
-        "MWS": "Mary Shelley"
-    }
+dataset = Dataset.from_pandas(df_train[['text', 'label']])
+def tokenize_func(examples):
+    return tokenizer(examples["text"], truncation=True, padding="max_length", max_length=512)
 
-    for i in range(len(example['text'])):
-        instruction = (
-            "Analyze the following gothic sentence and identify which author wrote it: "
-            "Edgar Allan Poe, H.P. Lovecraft, or Mary Shelley."
-        )
-        input_text = example['text'][i]
-        label = author_map.get(example['author'][i], example['author'][i])
-
-        text = (
-            f"### Instruction:\n{instruction}\n\n"
-            f"### Input:\n{input_text}\n\n"
-            f"### Response:\n{label}{tokenizer.eos_token}"
-        )
-        output_texts.append(text)
-    return output_texts
+tokenized_dataset = dataset.map(tokenize_func, batched=True)
 
 training_args = TrainingArguments(
     output_dir="./results",
     per_device_train_batch_size=4,
     gradient_accumulation_steps=4,
     learning_rate=2e-4,
+    num_train_epochs=1, 
     logging_steps=10,
-    max_steps=100,
-    optim="paged_adamw_32bit",      # The QLoRA-optimized optimizer
+    optim="paged_adamw_32bit",
     fp16=True,
-    save_strategy="steps",
-    save_steps=50,
+    save_strategy="no", # Save manually at the end
+    report_to="none"
 )
 
-train_dataset = pd.read_csv("train.csv")
-test_dataset = pd.read("test.csv")
-
-sftconfig = SFTConfig(
-    output_dir= "./resutlts",
-    dataset_text_field="text",
-    max_length=512,
-    packing=False,
-    per_device_train_batch_size=4,
-    learning_rate=2e-4,
+from transformers import Trainer
+trainer = Trainer(
+    model=model,
+    args=training_args,
+    train_dataset=tokenized_dataset,
+    processing_class=tokenizer,
 )
 
-sfttrainer = SFTTrainer(
-    model= model,
-    train_dataset= train_dataset,
-    eval_dataset= test_dataset,
-    peft_config= peft_config,
-    args= sftconfig,
-    processing_class=tokenizer
-)
+trainer.train()
 
-sfttrainer.train()
-
-sfttrainer.model.save_pretrained("./results")
+trainer.model.save_pretrained("./author_id_adapter")
 print("Training complete! Adapter saved.")
